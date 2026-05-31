@@ -44,6 +44,7 @@ def fetch_live_data(symbol, interval="5m"):
         closes = [x for x in res["indicators"]["quote"][0]["close"] if x is not None]
         highs  = [x for x in res["indicators"]["quote"][0]["high"] if x is not None]
         lows   = [x for x in res["indicators"]["quote"][0]["low"] if x is not None]
+        volumes = [x for x in res["indicators"]["quote"][0]["volume"] if x is not None]
         price = res["meta"]["regularMarketPrice"]
         prev_close = res["meta"].get("previousClose", price)
         
@@ -55,12 +56,20 @@ def fetch_live_data(symbol, interval="5m"):
         elif symbol == "^NSE91": name = "NIFTY NEXT 50"
         elif symbol == "HBLENGINE.NS": name = "HBL POWER"
         
-        day_high = round(highs[-1], 2) if highs else price
-        day_low = round(lows[-1], 2) if lows else price
+        recent_highs = highs[-20:] if len(highs) >= 20 else highs
+        recent_lows = lows[-20:] if len(lows) >= 20 else lows
+        recent_vols = volumes[-20:] if len(volumes) >= 20 else volumes
         
-        return round(price, 2), closes, round(prev_close, 2), name, day_high, day_low
+        tf_resistance = round(max(recent_highs), 2) if recent_highs else price
+        tf_support = round(min(recent_lows), 2) if recent_lows else price
+        
+        current_vol = volumes[-1] if volumes else 0
+        avg_vol = sum(recent_vols) / len(recent_vols) if recent_vols else 1
+        vol_ratio = round(current_vol / avg_vol, 1) if current_vol else 0
+        
+        return round(price, 2), closes, round(prev_close, 2), name, tf_resistance, tf_support, vol_ratio
     except:
-        return None, [], None, symbol, None, None
+        return None, [], None, symbol, None, None, 0
 
 def calc_ema(data, p):
     if len(data) < p: return None
@@ -74,6 +83,20 @@ def calc_rsi(data, p=14):
     l = sum(max(data[i-1]-data[i],0) for i in range(len(data)-p,len(data)))
     ag, al = g/p, l/p
     return round(100 - 100/(1+ag/al), 1) if al else 100.0
+
+def check_higher_tf_trend(symbol):
+    # બેકગ્રાઉન્ડમાં મોટા ટાઇમફ્રેમ (1 Hour) નો ટ્રેન્ડ ચેક કરવા માટેનું હેલ્પર
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1h&range=1mo"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        res = r["chart"]["result"][0]
+        closes = [x for x in res["indicators"]["quote"][0]["close"] if x is not None]
+        price = res["meta"]["regularMarketPrice"]
+        ema9 = calc_ema(closes, 9)
+        if ema9 and price > ema9: return True
+    except:
+        pass
+    return False
 
 def fetch_google_news(query):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -90,10 +113,10 @@ def fetch_google_news(query):
     return ""
 
 # =========================================================
-# 🔄 ટકાવારી (%-Based) સેન્ટિમેન્ટ અને રિસ્ક-રિવોર્ડ એન્જિન
+# 🔄 મલ્ટિ-ટાઇમફ્રેમ સપોર્ટ/રેઝિસ્ટન્સ અને જેકપોટ એન્જિન
 # =========================================================
 def generate_advanced_report(symbol, interval="5m", is_crypto=False):
-    price, closes, prev_close, name, d_high, d_low = fetch_live_data(symbol, interval)
+    price, closes, prev_close, name, tf_res, tf_sup, vol_ratio = fetch_live_data(symbol, interval)
     if not price: return f"❌ '{symbol}' નો લાઈવ ડેટા મળી શક્યો નહિ.", None
     
     rsi = calc_rsi(closes)
@@ -104,47 +127,57 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     p_change = round((change / prev_close) * 100, 2)
     sign = "$" if is_crypto else "₹"
     
-    # 🎯 🔥 ટકાવારી સેટ કરવાનું લોજિક (ઇન્ટ્રાડે વિ. સ્વિંગ)
     if interval in ["5m", "15m", "30m"]:
         trade_type = "INTRADAY"
-        risk_pct = 0.01 if is_crypto else 0.005   # ક્રિપ્ટો 1%, સ્ટોક્સ 0.5%
-        reward_pct = 0.02 if is_crypto else 0.01 # ક્રિપ્ટો 2%, સ્ટોક્સ 1.0%
+        is_intraday = True
     else:
         trade_type = "SWING TRADING"
-        risk_pct = 0.04 if is_crypto else 0.02   # ક્રિપ્ટો 4%, સ્ટોક્સ 2.0%
-        reward_pct = 0.08 if is_crypto else 0.04 # ક્રિપ્ટો 8%, સ્ટોક્સ 4.0%
+        is_intraday = False
         
-    # ટકાવારી પ્રમાણે અસલી રૂપિયાની ગણતરી
-    risk_amount = round(price * risk_pct, 2)
-    reward_amount = round(price * reward_pct, 2)
-    
     sentiment = "⚖️ SIDEWAYS / NEUTRAL"
-    action = f"👀 {trade_type} માટે માર્કેટ ન્યુટ્રલ ઝોનમાં છે, ઉતાવળ કર્યા વગર વેટ કરો."
+    action = f"👀 {trade_type}: પ્રાઇઝ અત્યારે સપોર્ટ અને રેઝિસ્ટન્સની વચ્ચે ફસાયેલી છે. બ્રેકઆઉટની વેટ કરો."
     
-    buffer = 20 if "NIFTY" in name or "SENSEX" in name else (30 if is_crypto else 1.5)
-    buy_above = round(max(ema9 or price, d_high) + buffer, 2)
-    entry_logic_text = f"💡 <b>SUGGESTED ENTRY POINT:</b>\n🚀 <b>Buy Breakout:</b> {sign}{buy_above:,} ની ઉપર કેન્ડલ ક્લોઝ થાય તો જ નવો ટ્રેડ લેવો."
+    vol_emoji = "📊"
+    if vol_ratio >= 2.0: vol_emoji = "🔥 HIGH VOLUME BOOST"
+    elif vol_ratio <= 0.5: vol_emoji = "💤 LOW VOLUME DRY"
+    vol_text = f"{vol_emoji} ({vol_ratio}x of Avg)"
     
-    if ema9 and ema21 and rsi != "N/A":
-        # ૧. તેજી (Bullish)
+    entry_logic_text = f"📍 <b>CHART LEVELS ({interval}):</b>\n🚧 <b>TF Resistance:</b> {sign}{tf_res:,}\n🛡️ <b>TF Support:</b> {sign}{tf_sup:,}\n📈 <b>Volume Mood:</b> {vol_text}\n\n👉 <i>આ ટાઇમફ્રેમ પર કન્ફર્મ બ્રેકઆઉટ વગર નવી એન્ટ્રી હિતાવહ નથી.</i>"
+    
+    if len(closes) > 21 and ema9 and ema21 and rsi != "N/A":
+        # ૧. તેજીનો ટ્રેન્ડ (Bullish Breakout Entry)
         if price > ema9 and price > ema21 and rsi >= 55:
             sentiment = "🚀 STRONG BULLISH"
-            action = f"🟢 <b>BUY / HOLD:</b> ચાર્ટ પર મજબૂત અપ-ટ્રેન્ડ છે. {trade_type} માટે પોઝિશન હોલ્ડ રખાય અથવા બાય કરાય."
-            entry_logic_text = f"🎯 <b>TGT (+{risk_pct*200}%):</b> {sign}{round(price + reward_amount, 2):,} [R:R 1:2]\n🛑 <b>SL (-{risk_pct*100}%):</b> {sign}{round(price - risk_amount, 2):,}"
+            action = f"🟢 <b>TREND:</b> {interval} ચાર્ટ પર ટ્રેન્ડ જોરદાર અપ છે. રેઝિસ્ટન્સ ક્રોસ થતાં જ સ્માર્ટ એન્ટ્રી લઈ શકાય."
             
-        elif price > ema9 and 50 <= rsi < 55:
-            sentiment = "🟢 MILD BULLISH"
-            action = f" odds <b>BUY ON DIPS:</b> ટ્રેન્ડ પોઝિટિવ બની રહ્યો છે, નાના ડીપ પર એન્ટ્રી લઈ શકાય."
-            entry_logic_text = f"🎯 <b>TGT (+{risk_pct*200}%):</b> {sign}{round(price + reward_amount, 2):,} [R:R 1:2]\n🛑 <b>SL (-{risk_pct*100}%):</b> {sign}{round(price - risk_amount, 2):,}"
+            suggested_entry = round(tf_res * 1.001, 2)
+            suggested_sl = tf_sup
+            risk_points = round(suggested_entry - suggested_sl, 2)
+            suggested_tgt = round(suggested_entry + (risk_points * 2), 2)
             
-        # ૨. મંદી (Bearish)
+            # 🔥 જેકપોટ મોમેન્ટમ ડિટેક્ટર લોજિક
+            jackpot_text = ""
+            if is_intraday and vol_ratio >= 2.0:
+                # બેકગ્રાઉન્ડમાં હાયર ટાઇમફ્રેમ કન્ફર્મેશન લેવું
+                if check_higher_tf_trend(symbol):
+                    jackpot_text = "\n\n🚀 <b>🔥 JACKPOT RALLY ALERT:</b>\nઆ ઇન્ટ્રાડે સેટઅપમાં બહુ મોટું પોટેન્શિયલ છે! ભારે વોલ્યુમ અને મોટા ટાઇમફ્રેમનો પણ સપોર્ટ હોવાથી, એન્ટ્રી મળ્યા પછી નાનો પ્રોફિટ લઈને નીકળવાને બદલે <b>Trailing SL</b> સાથે મોટી રેલી માટે હોલ્ડ કરો!"
+            
+            entry_logic_text = f"📍 <b>CHART LEVELS ({interval}):</b>\n🚧 <b>TF Resistance:</b> {sign}{tf_res:,}\n🛡️ <b>TF Support:</b> {sign}{tf_sup:,}\n📈 <b>Volume Mood:</b> {vol_text}\n\n💡 <b>SMART TRADING SETUP (R:R 1:2):</b>\n🚀 <b>Suggested Entry (Above TF High):</b> {sign}{suggested_entry:,}\n🎯 <b>Target (TGT):</b> {sign}{suggested_tgt:,}\n🛑 <b>Stop Loss (SL):</b> {sign}{suggested_sl:,}{jackpot_text}"
+            
+        # ૨. મંદીનો ટ્રેન્ડ (Bearish Breakdown Entry)
         elif price < ema9 and price < ema21 and rsi <= 42:
             sentiment = "⚠️ BEARISH PRESSURE"
             if "NIFTY" in name or "SENSEX" in name:
-                action = f"🔴 <b>AVOID NEW BUY:</b> આખો ઇન્ડેક્સ મંદીમાં છે. નવી કોઈ બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> આખા માર્કેટનો ટ્રેન્ડ ડાઉન હોવાથી, જો તમારા પર્સનલ સ્ટોક્સ તૂટતા હોય તો મોટું નુકસાન રોકવા <b>SELL (Exit)</b> કરવાનું સજેશન છે!"
+                action = f"🔴 <b>TREND:</b> {interval} પર આખું માર્કેટ મંદીના સકંજામાં છે. નવી બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> આખા માર્કેટનો ટ્રેન્ડ નેગેટિવ હોવાથી, જો તમારા પર્સનલ સ્ટોક્સ સપોર્ટ તોડતા હોય તો મોટું નુકસાન રોકવા તાત્કાલિક <b>SELL (Exit)</b> કરવાનું સજેશન છે!"
             else:
-                action = f"🔴 <b>AVOID NEW BUY:</b> શેરમાં ભારે કડાકો છે, નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> નુકસાન વધે એ પહેલાં સેફ્ટી માટે કરંટ ભાવથી હોલ્ડિંગ <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
-            entry_logic_text = f"🎯 <b>Short TGT (-{risk_pct*200}%):</b> {sign}{round(price - reward_amount, 2):,} [R:R 1:2]\n🛑 <b>Short SL (+{risk_pct*100}%):</b> {sign}{round(price + risk_amount, 2):,}"
+                action = f"🔴 <b>TREND:</b> {interval} ચાર્ટ પર ભારે સેલિંગ પ્રેશર ચાલુ છે. નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> નુકસાન વધુ મોટું થાય એ પહેલાં કેપિટલ બચાવવા કરંટ ભાવથી હોલ્ડિંગ <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
+            
+            suggested_entry = round(tf_sup * 0.999, 2)
+            suggested_sl = tf_res
+            risk_points = round(suggested_sl - suggested_entry, 2)
+            suggested_tgt = round(suggested_entry - (risk_points * 2), 2)
+            
+            entry_logic_text = f"📍 <b>CHART LEVELS ({interval}):</b>\n🚧 <b>TF Resistance:</b> {sign}{tf_res:,}\n🛡️ <b>TF Support:</b> {sign}{tf_sup:,}\n📈 <b>Volume Mood:</b> {vol_text}\n\n💡 <b>SMART TRADING SETUP (R:R 1:2):</b>\n📉 <b>Suggested Short Entry (Below TF Low):</b> {sign}{suggested_entry:,}\n🎯 <b>Short Target:</b> {sign}{suggested_tgt:,}\n🛑 <b>Short Stop Loss:</b> {sign}{suggested_sl:,}"
 
     news = fetch_google_news("Bitcoin Crypto" if is_crypto else name) if interval == "5m" else ""
     expiry_text = get_expiry_alert() if (not is_crypto and interval == "5m") else ""
@@ -155,11 +188,10 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     text = f"""{emoji} <b>{name} LIVE REPORT ({interval} | {trade_type})</b>
 
 💰 <b>Live Price:</b> {sign}{price:,} ({change:+} | {p_change:+}-%)
-🔼 <b>Day High:</b> {sign}{d_high:,} | 🔽 <b>Day Low:</b> {sign}{d_low:,}
 📉 <b>RSI (14):</b> {rsi} | 📈 <b>EMA9:</b> {ema9 or 'N/A'}
 ------------------------------------------
 🔥 <b>Intraday Sentiment:</b> {sentiment}
-👉 <b>કરંટ પ્રાઈઝથી શું કરવું?:</b> {action}
+👉 <b>કરંટ માર્કેટ મૂડ:</b> {action}
 ------------------------------------------
 {entry_logic_text}{expiry_text}{news}
 ⏰ {now_ist().strftime('%H:%M:%S IST')}"""
@@ -182,7 +214,7 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     return text, markup
 
 # ============================================
-# TELEGRAM UI & MAIN MENUS
+# TELEGRAM UI & INTERACTIONS
 # ============================================
 def send_telegram_msg(text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -199,7 +231,7 @@ def send_main_menu():
             [{"text": "🔥 MIDCAP 100", "callback_data": "m_midcap"}, {"text": "🔍 Search Stock", "callback_data": "m_search"}]
         ]
     }
-    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nતમારો નવો **% બેઝ્ડ સ્માર્ટ રિસ્ક-રિવોર્ડ** કોડ લાઈવ થઈ ગયો છે. નીચે ક્લિક કરો:", reply_markup=markup)
+    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nજેકપોટ રેલી ડિટેક્ટર સાથેનું ફૂલ ફાઇનલ એન્જિન તૈયાર છે. ટેસ્ટ કરવા નીચે ક્લિક કરો:", reply_markup=markup)
 
 def handle_callback(callback_id, data):
     global user_status
@@ -246,7 +278,7 @@ def handle_search_text(user_text):
 # ============================================
 # MAIN LOOP
 # ============================================
-print("Percentage-Based Multi-Timeframe Engine Active...")
+print("Ultimate Jackpot & Multi-Timeframe Analysis Engine Active...")
 offset = 0
 start_time = time.time()
 
