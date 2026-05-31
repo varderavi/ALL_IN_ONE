@@ -84,6 +84,9 @@ def fetch_google_news(query):
         pass
     return ""
 
+# =========================================================
+# 🪙 BITCOIN પાવરફુલ સેન્ટિમેન્ટ એન્જિન (Risk-Reward 1:2)
+# =========================================================
 def get_btc_advanced_report():
     price, closes, _, prev_close, _, name, d_high, d_low = fetch_live_data("BTC-USD")
     if not price: return "❌ Bitcoin નો લાઈવ ડેટા મળી શક્યો નહિ."
@@ -108,7 +111,8 @@ def get_btc_advanced_report():
             sentiment = "⚠️ BEARISH PRESSURE"
             action = "🔴 <b>AVOID / SHORT:</b> સેલિંગ પ્રેશર ચાલુ છે, નવી ખરીદી ટાળવી."
             
-    t_btc = round(price + 50, 2)
+    # 🔥 Risk-Reward 1:2 Logic (SL = -$50 | Target = +$100)
+    t_btc = round(price + 100, 2)
     sl_btc = round(price - 50, 2)
     news = fetch_google_news("Bitcoin Crypto")
     
@@ -121,10 +125,14 @@ def get_btc_advanced_report():
 🔥 <b>Intraday Sentiment:</b> {sentiment}
 👉 <b>કરંટ પ્રાઈઝથી શું કરવું?:</b> {action}
 ------------------------------------------
-🎯 <b>Logic Target (+$50):</b> ${t_btc:,}
-🛑 <b>Logic Stop Loss (-$50):</b> ${sl_btc:,}{news}
+🎯 <b>Logic Target (+$100):</b> ${t_btc:,} [R:R 1:2]
+🛑 <b>Logic Stop Loss (-$50):</b> ${sl_btc:,}
+{news}
 ⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
+# =========================================================
+# ⚡ HBL પાવરફુલ સેન્ટિમેન્ટ એન્જિન (Risk-Reward 1:2)
+# =========================================================
 def get_hbl_advanced_report():
     price, closes, _, prev_close, _, name, d_high, d_low = fetch_live_data("HBLENGINE.NS")
     if not price: return "❌ HBL નો લાઈવ ડેટા મળી શક્યો નહિ."
@@ -139,7 +147,6 @@ def get_hbl_advanced_report():
     action = "👀 અત્યારે શાંતિ રાખો, કન્ફર્મ બ્રેકઆઉટની વેટ કરો."
     
     if ema9 and ema21 and rsi != "N/A":
-        # 🔥 અહીં જે ભૂલ હતી તે બરાબર સુધારી લીધી છે
         if price > ema9 and price > ema21 and rsi >= 55:
             sentiment = "🚀 STRONG BULLISH"
             action = "🟢 <b>BUY / HOLD:</b> કરંટ પ્રાઈઝથી ઇન્ટ્રાડે બાય કરી શકાય અથવા પોઝિશન હોલ્ડ રખાય."
@@ -150,7 +157,8 @@ def get_hbl_advanced_report():
             sentiment = "⚠️ BEARISH PRESSURE"
             action = "🔴 <b>AVOID / SHORT:</b> નવો ટ્રેડ લેવો નહિ, સેલિંગ પ્રેશર વધારે છે."
             
-    t_intra = round(price + 5, 2)
+    # 🔥 Risk-Reward 1:2 Logic (SL = -₹5 | Target = +₹10)
+    t_intra = round(price + 10, 2)
     sl_intra = round(price - 5, 2)
     news = fetch_google_news("HBL Power")
     
@@ -163,8 +171,9 @@ def get_hbl_advanced_report():
 🔥 <b>Intraday Sentiment:</b> {sentiment}
 👉 <b>કરંટ પ્રાઈઝથી શું કરવું?:</b> {action}
 ------------------------------------------
-🎯 <b>Logic Target (+₹5):</b> ₹{t_intra}
-🛑 <b>Logic Stop Loss (-₹5):</b> ₹{sl_intra}{news}
+🎯 <b>Logic Target (+₹10):</b> ₹{t_intra} [R:R 1:2]
+🛑 <b>Logic Stop Loss (-₹5):</b> ₹{sl_intra}
+{news}
 ⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
 def get_report(symbol, is_crypto=False):
@@ -205,7 +214,7 @@ def send_main_menu():
             [{"text": "🔥 MIDCAP 100", "callback_data": "m_midcap"}, {"text": "🔍 Search Stock", "callback_data": "m_search"}]
         ]
     }
-    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nબિટકોઈન અને HBL બંનેમાં હવે એડવાન્સ સેન્ટિમેન્ટ અને પ્રાઈઝ રેન્જ સેટ છે. નીચે ટેબ પર ક્લિક કરો:", reply_markup=markup)
+    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nનવો Risk-Reward 1:2 રેશિયો સેટ થઈ ગયો છે! ડેટા જોવા માટે નીચે ટેબ પર ક્લિક કરો:", reply_markup=markup)
 
 def handle_callback(callback_id, data):
     global user_status
@@ -239,7 +248,7 @@ def handle_search_text(user_text):
 # ============================================
 # MAIN LOOP
 # ============================================
-print("Master engine restarted successfully...")
+print("Master engine with 1:2 Risk-Reward Active...")
 offset = 0
 start_time = time.time()
 
