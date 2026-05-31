@@ -1,0 +1,25 @@
+name: Market Master 24x7 Interactive Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # આ સેટિંગ દર ૨ મિનિટે ૨૪ કલાક (શનિ-રવિ સહિત) આખા વર્ષ માટે ઓટોમેટિક રન થશે
+    - cron: '*/2 * * * *'
+
+jobs:
+  run_master_bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install requests pytz
+
+      - name: Execute Master Bot
+        run: python market_master_bot.py
