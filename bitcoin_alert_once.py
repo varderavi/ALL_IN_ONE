@@ -4,10 +4,10 @@ import pytz
 from datetime import datetime
 
 # ============================================
-# SETTINGS
+# SETTINGS - (૧૦૦% કન્ફર્મ અને ડાયરેક્ટ સેટિંગ્સ)
 # ============================================
-BOT_TOKEN = os.environ.get("8874026729:AAEgzZr0UslgaKGdPiUjZMONNuFCKL-pqsY", "")
-CHAT_ID   = os.environ.get("1358803794", "")
+BOT_TOKEN = "8874026729:AAEgzzr0Us1gaKGdPiUjZMONNuFCKL-pqsY"
+CHAT_ID   = "1358803794"
 SYMBOL    = "BTC-USD"  # Yahoo Finance Bitcoin
 QTY       = 1
 MOVE      = 50
@@ -26,7 +26,7 @@ def send_telegram(msg):
         print(f"Telegram error: {e}")
 
 def fetch_data():
-    # Yahoo Finance માંથી બિટકોઈનનો 5 મિનિટનો ડેટા લેવા માટે
+    # Yahoo Finance માંથી બિટકોઈનનો 5 મિનિટનો લાઈવ ડેટા
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval=5m&range=2d"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -60,13 +60,13 @@ ema9  = calc_ema(closes, 9)
 ema21 = calc_ema(closes, 21)
 rsi   = calc_rsi(closes, 14)
 
-# વોલ્યુમ ચેક
+# વોલ્યુમ કેલ્ક્યુલેશન
 avg_vol = sum(volumes[-6:-1])/5 if len(volumes)>=6 else 0
 vol_x = round(volumes[-1]/avg_vol, 1) if avg_vol else 0
 
 print(f"Price=${price} EMA9={ema9} EMA21={ema21} RSI={rsi} Vol={vol_x}x")
 
-# ટેસ્ટ રન છે એટલે ટ્રેન્ડ ગમે તે હોય, આપણે સિગ્નલ જનરેટ કરીને મેસેજ મોકલીશું જ!
+# ટેસ્ટ એલર્ટ હોવાથી ટ્રેન્ડ મુજબ BUY અથવા SELL મેસેજ પાકો મોકલશે
 if ema9 > ema21:
     sig = "BUY"
     emoji = "🟢📈"
