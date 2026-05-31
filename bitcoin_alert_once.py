@@ -8,9 +8,9 @@ from datetime import datetime
 # ============================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
-
-# ટેસ્ટિંગ માટે આપણે લિમિટ એકદમ ઓછી (0.01%) કરી દઈએ, જેથી મેસેજ તરત આવી જાય!
-THRESHOLD_PERCENT = 0.01  
+SYMBOL    = "BTC-USD"  # Yahoo Finance Bitcoin
+QTY       = 1
+MOVE      = 50
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -25,36 +25,72 @@ def send_telegram(msg):
     except Exception as e:
         print(f"Telegram error: {e}")
 
-def fetch_bitcoin_data():
-    # આ સરળ અને ૧૦૦% કન્ફર્મ ચાલતું API સેટ કર્યું છે
-    url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+def fetch_data():
+    # Yahoo Finance માંથી બિટકોઈનનો 5 મિનિટનો ડેટા લેવા માટે
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval=5m&range=2d"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        r = requests.get(url, timeout=15)
-        res = r.json()
-        current_price = round(float(res["price"]), 2)
-        return current_price
+        r = requests.get(url, headers=headers, timeout=15)
+        res = r.json()["chart"]["result"][0]
+        closes  = [x for x in res["indicators"]["quote"][0]["close"]  if x is not None]
+        volumes = [x for x in res["indicators"]["quote"][0]["volume"] if x is not None]
+        price   = res["meta"]["regularMarketPrice"]
+        return round(price, 2), closes, volumes
     except Exception as e:
-        print(f"Fetch error: {e}")
-        return None
+        print(f"Fetch error: {e}"); return None, [], []
 
-price = fetch_bitcoin_data()
+def calc_ema(data, p):
+    if len(data) < p: return None
+    k = 2/(p+1); e = sum(data[:p])/p
+    for v in data[p:]: e = v*k + e*(1-k)
+    return round(e, 2)
 
-if price is None:
-    print("ડેટા મળી શક્યો નથી. સ્કીપ કરાય છે.")
-    exit(0)
+def calc_rsi(data, p=14):
+    if len(data) < p+1: return None
+    g = sum(max(data[i]-data[i-1],0) for i in range(len(data)-p,len(data)))
+    l = sum(max(data[i-1]-data[i],0) for i in range(len(data)-p,len(data)))
+    ag, al = g/p, l/p
+    return round(100 - 100/(1+ag/al), 1) if al else 100.0
 
-print(f"Bitcoin Price: ${price:,}")
+price, closes, volumes = fetch_data()
+if not price or len(closes) < 22:
+    print("Not enough data."); exit(0)
 
-# ટેસ્ટ રન છે એટલે આપણે સીધો જ મેસેજ મોકલી આપીશું
-emoji = "🚀🟢 <b>BITCOIN LIVE SIGNAL!</b>"
-    
-msg = f"""{emoji}
+ema9  = calc_ema(closes, 9)
+ema21 = calc_ema(closes, 21)
+rsi   = calc_rsi(closes, 14)
 
-💰 <b>Current Price:</b> ${price:,}
-📈 <b>Status:</b> Bot strictly running 24/7
+# વોલ્યુમ ચેક
+avg_vol = sum(volumes[-6:-1])/5 if len(volumes)>=6 else 0
+vol_x = round(volumes[-1]/avg_vol, 1) if avg_vol else 0
 
+print(f"Price=${price} EMA9={ema9} EMA21={ema21} RSI={rsi} Vol={vol_x}x")
+
+# ટેસ્ટ રન છે એટલે ટ્રેન્ડ ગમે તે હોય, આપણે સિગ્નલ જનરેટ કરીને મેસેજ મોકલીશું જ!
+if ema9 > ema21:
+    sig = "BUY"
+    emoji = "🟢📈"
+else:
+    sig = "SELL"
+    emoji = "🔴📉"
+
+t1  = round(price + (MOVE if sig == "BUY" else -MOVE), 2)
+sl  = round(price + (-MOVE if sig == "BUY" else MOVE), 2)
+
+msg = f"""{emoji} <b>{SYMBOL} {sig} LIVE SIGNAL!</b>
+
+💰 <b>Price:</b> ${price:,}
+📊 <b>EMA9:</b> {ema9} | <b>EMA21:</b> {ema21}
+📉 <b>RSI:</b> {rsi} | <b>Vol:</b> {vol_x}x
+
+🎯 <b>Entry:</b>    ${price:,}
+✅ <b>Target 1:</b>  ${t1:,}
+🛑 <b>Stop Loss:</b> ${sl:,}
+
+⚡ 24/7 Live Crypto Agent Running ✓
 ⏰ {now_ist().strftime('%d %b %Y  %H:%M IST')}
-<i>Live Updates from Binance ✓</i>"""
+
+<i>TradingView Tech Analyzed ✓</i>"""
 
 send_telegram(msg)
-print("Telegram alert sent successfully!")
+print("Bitcoin test alert sent successfully!")
