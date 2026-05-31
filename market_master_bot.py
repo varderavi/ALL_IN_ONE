@@ -28,14 +28,11 @@ def get_expiry_alert():
     elif weekday == 4: return "📅 <b>EXPIRY ALERT:</b> આજે <b>SENSEX</b> ની ધમાકેદાર એક્સપાયરી છે! 🎯"
     return ""
 
-# 🔄 ટાઇમફ્રેમ મુજબ યોગ્ય રેન્જ (Range) ઓટોમેટિક નક્કી કરવાનું એન્જિન
 def get_range_for_interval(interval):
-    if interval == "5m": return "2d"
-    elif interval == "15m": return "5d"
-    elif interval == "30m": return "5d"
+    if interval in ["5m", "15m", "30m"]: return "5d"
     elif interval == "1h": return "1mo"
     elif interval == "1d": return "3mo"
-    return "2d"
+    return "5d"
 
 def fetch_live_data(symbol, interval="5m"):
     timeframe_range = get_range_for_interval(interval)
@@ -93,7 +90,7 @@ def fetch_google_news(query):
     return ""
 
 # =========================================================
-# 📊 સ્માર્ટ મલ્ટિ-ટાઇમફ્રેમ રિપોર્ટ જનરેટર
+# 🔄 ટકાવારી (%-Based) સેન્ટિમેન્ટ અને રિસ્ક-રિવોર્ડ એન્જિન
 # =========================================================
 def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     price, closes, prev_close, name, d_high, d_low = fetch_live_data(symbol, interval)
@@ -107,38 +104,47 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     p_change = round((change / prev_close) * 100, 2)
     sign = "$" if is_crypto else "₹"
     
+    # 🎯 🔥 ટકાવારી સેટ કરવાનું લોજિક (ઇન્ટ્રાડે વિ. સ્વિંગ)
+    if interval in ["5m", "15m", "30m"]:
+        trade_type = "INTRADAY"
+        risk_pct = 0.01 if is_crypto else 0.005   # ક્રિપ્ટો 1%, સ્ટોક્સ 0.5%
+        reward_pct = 0.02 if is_crypto else 0.01 # ક્રિપ્ટો 2%, સ્ટોક્સ 1.0%
+    else:
+        trade_type = "SWING TRADING"
+        risk_pct = 0.04 if is_crypto else 0.02   # ક્રિપ્ટો 4%, સ્ટોક્સ 2.0%
+        reward_pct = 0.08 if is_crypto else 0.04 # ક્રિપ્ટો 8%, સ્ટોક્સ 4.0%
+        
+    # ટકાવારી પ્રમાણે અસલી રૂપિયાની ગણતરી
+    risk_amount = round(price * risk_pct, 2)
+    reward_amount = round(price * reward_pct, 2)
+    
     sentiment = "⚖️ SIDEWAYS / NEUTRAL"
-    action = "👀 માર્કેટ અત્યારે કન્ફ્યુઝન ઝોનમાં છે, શાંતિ રાખો અને વેટ કરો."
+    action = f"👀 {trade_type} માટે માર્કેટ ન્યુટ્રલ ઝોનમાં છે, ઉતાવળ કર્યા વગર વેટ કરો."
     
     buffer = 20 if "NIFTY" in name or "SENSEX" in name else (30 if is_crypto else 1.5)
     buy_above = round(max(ema9 or price, d_high) + buffer, 2)
-    entry_logic_text = f"💡 <b>SUGGESTED ENTRY POINT:</b>\n🚀 <b>Buy Breakout:</b> {sign}{buy_above:,} ની ઉપર મજબૂત ગ્રીન કેન્ડલ ક્લોઝ થાય તો જ નવો ટ્રેડ લેવો."
+    entry_logic_text = f"💡 <b>SUGGESTED ENTRY POINT:</b>\n🚀 <b>Buy Breakout:</b> {sign}{buy_above:,} ની ઉપર કેન્ડલ ક્લોઝ થાય તો જ નવો ટ્રેડ લેવો."
     
     if ema9 and ema21 and rsi != "N/A":
+        # ૧. તેજી (Bullish)
         if price > ema9 and price > ema21 and rsi >= 55:
             sentiment = "🚀 STRONG BULLISH"
-            action = f"🟢 <b>BUY / HOLD:</b> ચાર્ટ પર જબરદસ્ત તેજીનો માહોલ છે. પોઝિશન હોલ્ડ રાખવી અથવા આ ટાઇમફ્રેમ પર બાય કરી શકાય."
-            t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
-            sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
-            entry_logic_text = f"🎯 <b>Logic Target (+{sign}{t_val}):</b> {sign}{round(price+t_val,2):,} [R:R 1:2]\n🛑 <b>Logic Stop Loss (-{sign}{sl_val}):</b> {sign}{round(price-sl_val,2):,}"
+            action = f"🟢 <b>BUY / HOLD:</b> ચાર્ટ પર મજબૂત અપ-ટ્રેન્ડ છે. {trade_type} માટે પોઝિશન હોલ્ડ રખાય અથવા બાય કરાય."
+            entry_logic_text = f"🎯 <b>TGT (+{risk_pct*200}%):</b> {sign}{round(price + reward_amount, 2):,} [R:R 1:2]\n🛑 <b>SL (-{risk_pct*100}%):</b> {sign}{round(price - risk_amount, 2):,}"
             
         elif price > ema9 and 50 <= rsi < 55:
             sentiment = "🟢 MILD BULLISH"
-            action = f"📉 <b>BUY ON DIPS:</b> મોમેન્ટમ ધીમે-ધીમે પોઝિટિવ બની રહ્યો છે."
-            t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
-            sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
-            entry_logic_text = f"🎯 <b>Logic Target (+{sign}{t_val}):</b> {sign}{round(price+t_val,2):,} [R:R 1:2]\n🛑 <b>Logic Stop Loss (-{sign}{sl_val}):</b> {sign}{round(price-sl_val,2):,}"
+            action = f" odds <b>BUY ON DIPS:</b> ટ્રેન્ડ પોઝિટિવ બની રહ્યો છે, નાના ડીપ પર એન્ટ્રી લઈ શકાય."
+            entry_logic_text = f"🎯 <b>TGT (+{risk_pct*200}%):</b> {sign}{round(price + reward_amount, 2):,} [R:R 1:2]\n🛑 <b>SL (-{risk_pct*100}%):</b> {sign}{round(price - risk_amount, 2):,}"
             
+        # ૨. મંદી (Bearish)
         elif price < ema9 and price < ema21 and rsi <= 42:
             sentiment = "⚠️ BEARISH PRESSURE"
             if "NIFTY" in name or "SENSEX" in name:
-                action = f"🔴 <b>AVOID NEW BUY:</b> ઇન્ડેક્સ ભારે મંદીના સકંજામાં છે. નવી બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> જો તમારા પર્સનલ હોલ્ડિંગ્સ તૂટતા હોય તો મોટું નુકસાન રોકવા પ્રોફિટ બુક અથવા <b>SELL (Exit)</b> કરવાનું સજેશન છે!"
+                action = f"🔴 <b>AVOID NEW BUY:</b> આખો ઇન્ડેક્સ મંદીમાં છે. નવી કોઈ બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> આખા માર્કેટનો ટ્રેન્ડ ડાઉન હોવાથી, જો તમારા પર્સનલ સ્ટોક્સ તૂટતા હોય તો મોટું નુકસાન રોકવા <b>SELL (Exit)</b> કરવાનું સજેશન છે!"
             else:
-                action = f"🔴 <b>AVOID NEW BUY:</b> ભારે સેલિંગ પ્રેશર છે, નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> નુકસાન મોટું થાય એ પહેલાં કરંટ ભાવથી <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
-                
-            t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
-            sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
-            entry_logic_text = f"🎯 <b>Short Target (-{sign}{t_val}):</b> {sign}{round(price-t_val,2):,} [R:R 1:2]\n🛑 <b>Short Stop Loss (+{sign}{sl_val}):</b> {sign}{round(price+sl_val,2):,}"
+                action = f"🔴 <b>AVOID NEW BUY:</b> શેરમાં ભારે કડાકો છે, નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> નુકસાન વધે એ પહેલાં સેફ્ટી માટે કરંટ ભાવથી હોલ્ડિંગ <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
+            entry_logic_text = f"🎯 <b>Short TGT (-{risk_pct*200}%):</b> {sign}{round(price - reward_amount, 2):,} [R:R 1:2]\n🛑 <b>Short SL (+{risk_pct*100}%):</b> {sign}{round(price + risk_amount, 2):,}"
 
     news = fetch_google_news("Bitcoin Crypto" if is_crypto else name) if interval == "5m" else ""
     expiry_text = get_expiry_alert() if (not is_crypto and interval == "5m") else ""
@@ -146,7 +152,7 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
     
     emoji = "🟢📈" if change >= 0 else "🔴📉"
     
-    text = f"""{emoji} <b>{name} LIVE REPORT ({interval} Chart)</b>
+    text = f"""{emoji} <b>{name} LIVE REPORT ({interval} | {trade_type})</b>
 
 💰 <b>Live Price:</b> {sign}{price:,} ({change:+} | {p_change:+}-%)
 🔼 <b>Day High:</b> {sign}{d_high:,} | 🔽 <b>Day Low:</b> {sign}{d_low:,}
@@ -158,8 +164,7 @@ def generate_advanced_report(symbol, interval="5m", is_crypto=False):
 {entry_logic_text}{expiry_text}{news}
 ⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
-    # 🔥 ડાયનેમિક સબ-મેનૂ બટનો (ટાઇમફ્રેમ ચેન્જ કરવા માટે)
-    c_type = "1" if is_crypto else "0" # ૧ એટલે ક્રિપ્ટો, ૦ એટલે ઇન્ડિયન માર્કેટ
+    c_type = "1" if is_crypto else "0"
     markup = {
         "inline_keyboard": [
             [
@@ -194,13 +199,12 @@ def send_main_menu():
             [{"text": "🔥 MIDCAP 100", "callback_data": "m_midcap"}, {"text": "🔍 Search Stock", "callback_data": "m_search"}]
         ]
     }
-    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nડેટા જોવા માટે નીચે આપેલા કોઈ પણ મેઈન બટન પર ક્લિક કરો. રિઝલ્ટ આવ્યા પછી તમે તેની ટાઇમફ્રેમ પણ બદલી શકશો:", reply_markup=markup)
+    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nતમારો નવો **% બેઝ્ડ સ્માર્ટ રિસ્ક-રિવોર્ડ** કોડ લાઈવ થઈ ગયો છે. નીચે ક્લિક કરો:", reply_markup=markup)
 
 def handle_callback(callback_id, data):
     global user_status
     text, markup = "", None
     
-    # મુખ્ય મેનૂના બટનો
     if data == "m_hbl": text, markup = generate_advanced_report("HBLENGINE.NS", "5m")
     elif data == "m_btc": text, markup = generate_advanced_report("BTC-USD", "5m", is_crypto=True)
     elif data == "m_nifty": text, markup = generate_advanced_report("^NSEI", "5m")
@@ -217,20 +221,14 @@ def handle_callback(callback_id, data):
         send_telegram_msg("🔍 <b>Script Search Activated:</b>\n\nકૃપા કરીને નામ મોકલો:")
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
         return
-        
-    # 🔥 ટાઇમફ્રેમ ચેન્જ કરવાનું ડાયનેમિક બટન લોજિક (tf_symbol_oldtf_iscrypto_newtf)
     elif data.startswith("tf_"):
         parts = data.split("_")
         sym = parts[1]
         is_cry = True if parts[3] == "1" else False
         new_tf = parts[4]
-        
-        # જૂના મેસેજને એડિટ કરવાને બદલે ફ્રેશ નવો મેસેજ મોકલશે ટાઇમફ્રેમના બટનો સાથે
         text, markup = generate_advanced_report(sym, new_tf, is_crypto=is_cry)
 
-    if text: 
-        send_telegram_msg(text, reply_markup=markup)
-        
+    if text: send_telegram_msg(text, reply_markup=markup)
     requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
 def handle_search_text(user_text):
@@ -248,7 +246,7 @@ def handle_search_text(user_text):
 # ============================================
 # MAIN LOOP
 # ============================================
-print("Multi-Timeframe Master Engine Active...")
+print("Percentage-Based Multi-Timeframe Engine Active...")
 offset = 0
 start_time = time.time()
 
