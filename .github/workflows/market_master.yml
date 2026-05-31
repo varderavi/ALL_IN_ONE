@@ -1,7 +1,9 @@
 name: Market Master 24x7 Interactive Bot
 
 on:
+  # 🔥 આ લાઇન ઉમેરવાથી Actions પેજ પર લીલું "Run workflow" બટન આવી જશે
   workflow_dispatch:
+
   schedule:
     # આ સેટિંગ દર ૨ મિનિટે ૨૪ કલાક (શનિ-રવિ સહિત) આખા વર્ષ માટે ઓટોમેટિક રન થશે
     - cron: '*/2 * * * *'
