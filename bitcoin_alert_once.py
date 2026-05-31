@@ -2,70 +2,36 @@ import requests
 import os
 import pytz
 import xml.etree.ElementTree as ET
+import time
 from datetime import datetime
 
 # ============================================
-# SETTINGS
+# CONFIGURATION
 # ============================================
 BOT_TOKEN = "8874026729:AAEgzZr0UslgaKGdPiUjZMONNuFCKL-pqsY"
 CHAT_ID   = "1358803794"
-SYMBOL    = "BTC-USD"
-MOVE      = 50
 
 IST = pytz.timezone("Asia/Kolkata")
 
 def now_ist():
     return datetime.now(IST)
 
-def is_morning_report_time():
-    n = now_ist()
-    # સવારે ૯:૦૦ થી ૯:૧૫ ની વચ્ચે રન થાય ત્યારે ટ્રુ (True) થશે
-    mins = n.hour * 60 + n.minute
-    return 540 <= mins < 555
-
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    try:
-        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-        print("Telegram Response:", r.json().get("ok"))
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
-def fetch_crypto_news():
-    query = "Bitcoin"
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        root = ET.fromstring(r.text)
-        news_items = []
-        for item in root.findall(".//item")[:2]: # ટોપ ૨ ક્રિપ્ટો ન્યૂઝ હેડલાઇન્સ
-            title = item.find("title").text
-            link = item.find("link").text
-            clean_title = title.split(" - ")[0]
-            source = title.split(" - ")[-1] if " - " in title else "Crypto News"
-            news_items.append(f"• 📰 <b>{clean_title}</b> ({source})\n  🔗 <a href='{link}'>વાંચવા માટે અહીં ક્લિક કરો</a>")
-        
-        if news_items:
-            return "\n\n📢 <b>LATEST CRYPTO NEWS:</b>\n" + "\n".join(news_items)
-        return "\n\n📢 <b>LATEST CRYPTO NEWS:</b>\n• હાલમાં કોઈ ફ્રેશ ક્રિપ્ટો ન્યૂઝ મળ્યા નથી."
-    except Exception as e:
-        print(f"News fetch error: {e}")
-        return ""
-
-def fetch_data():
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval=5m&range=2d"
+# ============================================
+# CORE ENGINES (ડેટા, ઇન્ડિકેટર્સ અને ન્યૂઝ લાવવા માટે)
+# ============================================
+def fetch_live_data(symbol, interval="5m", timeframe_range="2d"):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={timeframe_range}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=15)
         res = r.json()["chart"]["result"][0]
         closes  = [x for x in res["indicators"]["quote"][0]["close"]  if x is not None]
+        highs   = [x for x in res["indicators"]["quote"][0]["high"]   if x is not None]
         volumes = [x for x in res["indicators"]["quote"][0]["volume"] if x is not None]
         price   = res["meta"]["regularMarketPrice"]
-        prev_close = res["meta"].get("previousClose", price)
-        return round(price, 2), closes, volumes, round(prev_close, 2)
-    except Exception as e:
-        print(f"Fetch error: {e}"); return None, [], [], None
+        return round(price, 2), closes, highs, volumes
+    except:
+        return None, [], [], []
 
 def calc_ema(data, p):
     if len(data) < p: return None
@@ -80,82 +46,135 @@ def calc_rsi(data, p=14):
     ag, al = g/p, l/p
     return round(100 - 100/(1+ag/al), 1) if al else 100.0
 
-price, closes, volumes, prev_close = fetch_data()
-if not price or len(closes) < 22:
-    print("Not enough data."); exit(0)
+def fetch_google_news(query):
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        root = ET.fromstring(r.text)
+        news_items = []
+        for item in root.findall(".//item")[:1]: # ટોપ ૧ બ્રેકિંગ ન્યૂઝ
+            title = item.find("title").text.split(" - ")[0]
+            link = item.find("link").text
+            news_items.append(f"• 📰 <b>{title}</b>\n  🔗 <a href='{link}'>વાંચવા માટે ક્લિક કરો</a>")
+        return "\n\n📢 <b>LATEST NEWS:</b>\n" + "\n".join(news_items) if news_items else ""
+    except:
+        return ""
 
-ema9  = calc_ema(closes, 9)
-ema21 = calc_ema(closes, 21)
-rsi   = calc_rsi(closes, 14)
-
-avg_vol = sum(volumes[-6:-1])/5 if len(volumes)>=6 else 0
-vol_x = round(volumes[-1]/avg_vol, 1) if avg_vol else 0
-
-news_details = fetch_crypto_news()
-
-# ---------------------------------------------------------
-# 🔥 ૧. રોજ સવારે ૯:૦૫ વાગ્યે મોર્નિંગ પ્રિડિક્શન રિપોર્ટ મોકલવો
-# ---------------------------------------------------------
-if is_morning_report_time():
-    change24h = round(price - prev_close, 2)
-    p_change24h = round((change24h / prev_close) * 100, 2)
+# ============================================
+# REPORT BUILDERS (તમારા લોજિક મુજબ મેસેજ ડિઝાઇન)
+# ============================================
+def get_hbl_report():
+    price, closes, highs, volumes = fetch_live_data("HBLENGINE.NS", "5m", "2d")
+    if not price: return "❌ HBL નો લાઈવ ડેટા મેળવવામાં ભૂલ થઈ છે."
+    rsi = calc_rsi(closes)
+    news = fetch_google_news("HBL Power")
     
-    trend_emoji = "📈" if change24h >= 0 else "📉"
+    # આપણું જૂનું લોજિક ગણતરી (ઇન્ટ્રાડે ₹5)
+    t_intra = round(price + 5, 2)
+    sl_intra = round(price - 5, 2)
     
-    # RSI ના આધારે આજના દિવસનું પ્રોજેક્શન
-    if rsi >= 60:
-        projection = "🔥 <b>આજનો અંદાજ (Projection):</b> બિટકોઈન અત્યારે ઓવર-બૉટ (Strong Bullish) ઝોનમાં છે. માર્કેટમાં તેજીનું જોર વધારે હોવાથી આજે નવો ઉછાળો જોવા મળી શકે છે."
-    elif rsi <= 40:
-        projection = "⚠️ <b>આજનો અંદાજ (Projection):</b> RSI નબળાઈ દર્શાવે છે (Bearish Momentum). માર્કેટ પર થોડું પ્રેશર હોવાથી આજે પ્રોફિટ બુકિંગ કે ઘટાડો આવી શકે છે."
-    else:
-        projection = "⚖️ <b>આજનો અંદાજ (Projection):</b> RSI એકદમ ન્યુટ્રલ રેન્જમાં છે. બિટકોઈન આજે મોટાભાગે સાઇડવેઝ રેન્જમાં જ રન કરે તેવી શક્યતા છે."
+    return f"""⚡ <b>HBL POWER SYSTEMS LIVE REPORT</b>
 
-    msg_morning = f"""☀️ {trend_emoji} <b>BTC-USD MORNING CRYPTO OUTLOOK</b>
-🎯 <i>(બોટ ટેસ્ટિંગ અને ડેઇલી માર્કેટ અપડેટ)</i>
+💰 <b>Live Price:</b> ₹{price}
+📉 <b>5M RSI:</b> {rsi}
+🔥 <b>Logic Target (+₹5):</b> ₹{t_intra}
+🛑 <b>Logic Stop Loss (-₹5):</b> ₹{sl_intra}
+⏳ <b>Intraday Prediction:</b> Same Day{news}
+⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
-💰 <b>Live Bitcoin Price:</b> ${price:,}
-🔄 <b>24H Change:</b> {change24h:+} ({p_change24h:+}%)
-📊 <b>Current RSI:</b> {rsi} | <b>EMA9/21:</b> {ema9}/{ema21}
+def get_wipro_report():
+    price, closes, _, _ = fetch_live_data("WIPRO.NS", "5m", "2d")
+    if not price: return "❌ Wipro નો લાઈવ ડેટા મેળવવામાં ભૂલ થઈ છે."
+    rsi = calc_rsi(closes)
+    news = fetch_google_news("Wipro Buyback")
+    
+    return f"""💻 <b>WIPRO LIMITED LIVE REPORT</b>
 
---------------------------------------------------
-{projection}
---------------------------------------------------{news_details}
+💰 <b>Live Price:</b> ₹{price}
+📉 <b>5M RSI:</b> {rsi}
+📊 <b>EMA9:</b> {calc_ema(closes, 9)} | <b>EMA21:</b> {calc_ema(closes, 21)}{news}
+⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
-⚡ 24/7 Crypto Monitoring Active ✓
-⏰ {now_ist().strftime('%d %b %Y  %H:%M IST')}"""
+def get_btc_report():
+    price, closes, _, volumes = fetch_live_data("BTC-USD", "5m", "2d")
+    if not price: return "❌ Bitcoin નો લાઈવ ડેટા મેળવવામાં ભૂલ થઈ છે."
+    rsi = calc_rsi(closes)
+    news = fetch_google_news("Bitcoin Crypto")
+    
+    t_btc = round(price + 50, 2)
+    sl_btc = round(price - 50, 2)
+    
+    return f"""🪙 <b>BITCOIN (BTC-USD) LIVE REPORT</b>
 
-    send_telegram(msg_morning)
-    print("Morning Bitcoin Report Sent!")
-    exit(0)
+💰 <b>Live Price:</b> ${price:,}
+📉 <b>5M RSI:</b> {rsi}
+🟢 <b>Target (+$50):</b> ${t_btc:,}
+🔴 <b>Stop Loss (-$50):</b> ${sl_btc:,}{news}
+⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
-# ---------------------------------------------------------
-# ૨. દિવસ દરમિયાન બાકીના સમયે લાઈવ ટ્રેન્ડ સ્કેન કરવો
-# ---------------------------------------------------------
-buy_signal  = (ema9 > ema21) and (45 <= rsi <= 65) and (price > ema9)
-sell_signal = (ema9 < ema21) and (35 <= rsi <= 55) and (price < ema9)
+# ============================================
+# TELEGRAM BOT INTERACTION MECHANISM
+# ============================================
+def send_menu():
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": "👋 <b>નમસ્તે રવિ!</b>\nતમારો પર્સનલ AI ટ્રેડિંગ એજન્ટ રેડી છે. તમારે ક્યા શેર કે ક્રિપ્ટોની લાઈવ વિગતો જોવી છે? નીચેથી ઓપ્શન પસંદ કરો:",
+        "parse_mode": "HTML",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "⚡ HBL Power Details", "callback_data": "hbl_data"}],
+                [{"text": "💻 Wipro Details", "callback_data": "wipro_data"}],
+                [{"text": "🪙 Bitcoin Live Status", "callback_data": "btc_data"}]
+            ]
+        }
+    }
+    requests.post(url, json=payload)
 
-if not buy_signal and not sell_signal:
-    print("સિગ્નલ મેચ થતું નથી. WAIT.")
-    exit(0)
+def handle_callback(callback_id, data):
+    # બટન ક્લિક થાય ત્યારે કયો રિપોર્ટ મોકલવો તે નક્કી કરશે
+    if data == "hbl_data": text = get_hbl_report()
+    elif data == "wipro_data": text = get_wipro_report()
+    elif data == "btc_data": text = get_btc_report()
+    else: text = "ભૂલ થઈ છે."
+    
+    # નવો મેસેજ મોકલો
+    url_msg = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url_msg, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
+    
+    # ટેલિગ્રામ લોડિંગ આઇકન બંધ કરવા માટે
+    url_ans = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
+    requests.post(url_ans, json={"callback_query_id": callback_id})
 
-sig = "BUY" if buy_signal else "SELL"
-emoji = "🟢📈" if buy_signal else "🔴📉"
+# ============================================
+# 🚨 MAIN POLLING LOOP (લાઈવ ચેકિંગ ચક્ર)
+# ============================================
+print("Ravi's Smart Interactive Bot Started...")
+offset = 0
 
-t1  = round(price + (MOVE if sig == "BUY" else -MOVE), 2)
-sl  = round(price + (-MOVE if sig == "BUY" else MOVE), 2)
-
-msg = f"""{emoji} <b>{SYMBOL} {sig} SIGNAL!</b>
-
-💰 <b>Price:</b> ${price:,}
-📊 <b>EMA9:</b> {ema9} | <b>EMA21:</b> {ema21}
-📉 <b>RSI:</b> {rsi} | <b>Vol:</b> {vol_x}x
-
-🎯 <b>Entry:</b>    ${price:,}
-✅ <b>Target 1:</b>  ${t1:,}
-🛑 <b>Stop Loss:</b> ${sl:,}{news_details}
-
-⚡ 24/7 Live Crypto Agent Running ✓
-⏰ {now_ist().strftime('%d %b %Y  %H:%M IST')}"""
-
-send_telegram(msg)
-print(f"Live Signal Sent: {sig}")
+# આ લૂપ ૧ મિનિટ સુધી સતત ટેલિગ્રામ પર તમારા મેસેજની રાહ જોશે (ગૂગલ એક્શન રન ટાઈમ માટે સેફ)
+start_time = time.time()
+while time.time() - start_time < 60:
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=5"
+        r = requests.get(url, timeout=10).json()
+        
+        if "result" in r:
+            for update in r["result"]:
+                offset = update["update_id"] + 1
+                
+                # ૧. જો તમે ટેક્સ્ટ મેસેજ મોકલો (દા.ત. Hi, Hello, hbl)
+                if "message" in update and "text" in update["message"]:
+                    user_msg = update["message"]["text"].lower()
+                    if user_msg in ["hi", "hello", "hey", "menu", "hbl", "wipro", "btc"]:
+                        send_menu()
+                        
+                # ૨. જો તમે બટન (Inline Tab) પર ક્લિક કરો
+                elif "callback_query" in update:
+                    c_id = update["callback_query"]["id"]
+                    c_data = update["callback_query"]["data"]
+                    handle_callback(c_id, c_data)
+    except:
+        pass
+    time.sleep(1)
