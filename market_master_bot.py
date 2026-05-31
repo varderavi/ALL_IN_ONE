@@ -28,8 +28,18 @@ def get_expiry_alert():
     elif weekday == 4: return "📅 <b>EXPIRY ALERT:</b> આજે <b>SENSEX</b> ની ધમાકેદાર એક્સપાયરી છે! 🎯"
     return ""
 
-def fetch_live_data(symbol, interval="5m", timeframe_range="2d", include_prepost=False):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={timeframe_range}&includePrePost={'true' if include_prepost else 'false'}"
+# 🔄 ટાઇમફ્રેમ મુજબ યોગ્ય રેન્જ (Range) ઓટોમેટિક નક્કી કરવાનું એન્જિન
+def get_range_for_interval(interval):
+    if interval == "5m": return "2d"
+    elif interval == "15m": return "5d"
+    elif interval == "30m": return "5d"
+    elif interval == "1h": return "1mo"
+    elif interval == "1d": return "3mo"
+    return "2d"
+
+def fetch_live_data(symbol, interval="5m"):
+    timeframe_range = get_range_for_interval(interval)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={timeframe_range}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=15)
@@ -37,10 +47,8 @@ def fetch_live_data(symbol, interval="5m", timeframe_range="2d", include_prepost
         closes = [x for x in res["indicators"]["quote"][0]["close"] if x is not None]
         highs  = [x for x in res["indicators"]["quote"][0]["high"] if x is not None]
         lows   = [x for x in res["indicators"]["quote"][0]["low"] if x is not None]
-        volumes = [x for x in res["indicators"]["quote"][0]["volume"] if x is not None]
         price = res["meta"]["regularMarketPrice"]
         prev_close = res["meta"].get("previousClose", price)
-        pre_price = res["meta"].get("preMarketPrice", price)
         
         name = symbol
         if symbol == "^NSEI": name = "NIFTY 50"
@@ -53,9 +61,9 @@ def fetch_live_data(symbol, interval="5m", timeframe_range="2d", include_prepost
         day_high = round(highs[-1], 2) if highs else price
         day_low = round(lows[-1], 2) if lows else price
         
-        return round(price, 2), closes, volumes, round(prev_close, 2), round(pre_price, 2), name, day_high, day_low
+        return round(price, 2), closes, round(prev_close, 2), name, day_high, day_low
     except:
-        return None, [], [], None, None, symbol, None, None
+        return None, [], None, symbol, None, None
 
 def calc_ema(data, p):
     if len(data) < p: return None
@@ -85,11 +93,11 @@ def fetch_google_news(query):
     return ""
 
 # =========================================================
-# 🔄 ડાયનેમિક સેન્ટિમેન્ટ અને એન્ટ્રી/એક્ઝિટ એન્જિન (શેર્સ અને ઇન્ડેક્સ બંને માટે)
+# 📊 સ્માર્ટ મલ્ટિ-ટાઇમફ્રેમ રિપોર્ટ જનરેટર
 # =========================================================
-def generate_advanced_report(symbol, is_crypto=False):
-    price, closes, _, prev_close, _, name, d_high, d_low = fetch_live_data(symbol)
-    if not price: return f"❌ '{symbol}' નો લાઈવ ડેટા મળી શક્યો નહિ."
+def generate_advanced_report(symbol, interval="5m", is_crypto=False):
+    price, closes, prev_close, name, d_high, d_low = fetch_live_data(symbol, interval)
+    if not price: return f"❌ '{symbol}' નો લાઈવ ડેટા મળી શક્યો નહિ.", None
     
     rsi = calc_rsi(closes)
     ema9 = calc_ema(closes, 9)
@@ -99,53 +107,46 @@ def generate_advanced_report(symbol, is_crypto=False):
     p_change = round((change / prev_close) * 100, 2)
     sign = "$" if is_crypto else "₹"
     
-    # ડિફોલ્ટ સેટિંગ્સ
     sentiment = "⚖️ SIDEWAYS / NEUTRAL"
     action = "👀 માર્કેટ અત્યારે કન્ફ્યુઝન ઝોનમાં છે, શાંતિ રાખો અને વેટ કરો."
     
-    # ડાયનેમિક રેન્જ બફર પકડવું (ઇન્ડેક્સ માટે મોટો બફર અને શેર માટે નાનો)
     buffer = 20 if "NIFTY" in name or "SENSEX" in name else (30 if is_crypto else 1.5)
     buy_above = round(max(ema9 or price, d_high) + buffer, 2)
     entry_logic_text = f"💡 <b>SUGGESTED ENTRY POINT:</b>\n🚀 <b>Buy Breakout:</b> {sign}{buy_above:,} ની ઉપર મજબૂત ગ્રીન કેન્ડલ ક્લોઝ થાય તો જ નવો ટ્રેડ લેવો."
     
-    # 🧠 ટ્રેન્ડ અને રિસ્ક-રેવોર્ડ 1:2 કેલ્ક્યુલેશન
     if ema9 and ema21 and rsi != "N/A":
-        # ૧. તેજીનો ટ્રેન્ડ (Bullish)
         if price > ema9 and price > ema21 and rsi >= 55:
             sentiment = "🚀 STRONG BULLISH"
-            action = f"🟢 <b>BUY / HOLD:</b> આખા માર્કેટમાં જબરદસ્ત તેજીનો માહોલ છે. પોઝિશન હોલ્ડ રાખવી અથવા કરંટ ભાવથી એન્ટ્રી કરી શકાય."
+            action = f"🟢 <b>BUY / HOLD:</b> ચાર્ટ પર જબરદસ્ત તેજીનો માહોલ છે. પોઝિશન હોલ્ડ રાખવી અથવા આ ટાઇમફ્રેમ પર બાય કરી શકાય."
             t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
             sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
             entry_logic_text = f"🎯 <b>Logic Target (+{sign}{t_val}):</b> {sign}{round(price+t_val,2):,} [R:R 1:2]\n🛑 <b>Logic Stop Loss (-{sign}{sl_val}):</b> {sign}{round(price-sl_val,2):,}"
             
         elif price > ema9 and 50 <= rsi < 55:
             sentiment = "🟢 MILD BULLISH"
-            action = f" odds <b>BUY ON DIPS:</b> મોમેન્ટમ પોઝિટિવ તરફ જઈ રહ્યું છે. નાના ડીપ પર એડ કરી શકાય."
+            action = f"📉 <b>BUY ON DIPS:</b> મોમેન્ટમ ધીમે-ધીમે પોઝિટિવ બની રહ્યો છે."
             t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
             sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
             entry_logic_text = f"🎯 <b>Logic Target (+{sign}{t_val}):</b> {sign}{round(price+t_val,2):,} [R:R 1:2]\n🛑 <b>Logic Stop Loss (-{sign}{sl_val}):</b> {sign}{round(price-sl_val,2):,}"
             
-        # ૨. મંદીનો ટ્રેન્ડ (Bearish) -> 🔥 હોલ્ડિંગ સેલ સજેશન લોજિક
         elif price < ema9 and price < ema21 and rsi <= 42:
             sentiment = "⚠️ BEARISH PRESSURE"
-            
-            # શેર અને ઇન્ડેક્સ બંને માટે કોમન સેલ સજેશન
             if "NIFTY" in name or "SENSEX" in name:
-                action = f"🔴 <b>AVOID NEW BUY:</b> આખો ઇન્ડેક્સ ભારે મંદીના સકંજામાં છે. નવી કોઈ જ બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> આખા માર્કેટનો ટ્રેન્ડ નેગેટિવ હોવાથી, જો તમારા પર્સનલ શેર હોલ્ડિંગ્સમાં કડાકો આવતો હોય તો મોટું નુકસાન રોકવા પ્રોફિટ બુક અથવા <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
+                action = f"🔴 <b>AVOID NEW BUY:</b> ઇન્ડેક્સ ભારે મંદીના સકંજામાં છે. નવી બાયિંગ એન્ટ્રી અત્યારે ભૂલથી પણ ન કરવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> જો તમારા પર્સનલ હોલ્ડિંગ્સ તૂટતા હોય તો મોટું નુકસાન રોકવા પ્રોફિટ બુક અથવા <b>SELL (Exit)</b> કરવાનું સજેશન છે!"
             else:
-                action = f"🔴 <b>AVOID NEW BUY:</b> આ સ્ક્રિપ્ટમાં ભારે સેલિંગ પ્રેશર છે, નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> જો તમારી પાસે આનું હોલ્ડિંગ પડ્યું હોય, તો કેપિટલ બચાવવા કરંટ ભાવથી <b>SELL (Exit)</b> કરવાનું સ્ટ્રોન્ગ સજેશન છે!"
+                action = f"🔴 <b>AVOID NEW BUY:</b> ભારે સેલિંગ પ્રેશર છે, નવી ખરીદી ટાળવી.\n\n🛑 <b>HOLDING EXIT ALERT:</b> નુકસાન મોટું થાય એ પહેલાં કરંટ ભાવથી <b>SELL (Exit)</b> કરવાનું ખાસ સજેશન છે!"
                 
             t_val = 100 if is_crypto else (150 if "BANK" in name else (80 if "NIFTY" in name or "SENSEX" in name else 10))
             sl_val = 50 if is_crypto else (75 if "BANK" in name else (40 if "NIFTY" in name or "SENSEX" in name else 5))
             entry_logic_text = f"🎯 <b>Short Target (-{sign}{t_val}):</b> {sign}{round(price-t_val,2):,} [R:R 1:2]\n🛑 <b>Short Stop Loss (+{sign}{sl_val}):</b> {sign}{round(price+sl_val,2):,}"
 
-    news = fetch_google_news("Bitcoin Crypto" if is_crypto else name)
-    expiry_text = get_expiry_alert() if not is_crypto else ""
+    news = fetch_google_news("Bitcoin Crypto" if is_crypto else name) if interval == "5m" else ""
+    expiry_text = get_expiry_alert() if (not is_crypto and interval == "5m") else ""
     if expiry_text: expiry_text = f"\n\n{expiry_text}"
     
     emoji = "🟢📈" if change >= 0 else "🔴📉"
     
-    return f"""{emoji} <b>{name} LIVE REPORT & SENTIMENT</b>
+    text = f"""{emoji} <b>{name} LIVE REPORT ({interval} Chart)</b>
 
 💰 <b>Live Price:</b> {sign}{price:,} ({change:+} | {p_change:+}-%)
 🔼 <b>Day High:</b> {sign}{d_high:,} | 🔽 <b>Day Low:</b> {sign}{d_low:,}
@@ -157,8 +158,26 @@ def generate_advanced_report(symbol, is_crypto=False):
 {entry_logic_text}{expiry_text}{news}
 ⏰ {now_ist().strftime('%H:%M:%S IST')}"""
 
+    # 🔥 ડાયનેમિક સબ-મેનૂ બટનો (ટાઇમફ્રેમ ચેન્જ કરવા માટે)
+    c_type = "1" if is_crypto else "0" # ૧ એટલે ક્રિપ્ટો, ૦ એટલે ઇન્ડિયન માર્કેટ
+    markup = {
+        "inline_keyboard": [
+            [
+                {"text": "⏱️ 5 Min", "callback_data": f"tf_{symbol}_{interval}_{c_type}_5m"},
+                {"text": "⏱️ 15 Min", "callback_data": f"tf_{symbol}_{interval}_{c_type}_15m"},
+                {"text": "⏱️ 30 Min", "callback_data": f"tf_{symbol}_{interval}_{c_type}_30m"}
+            ],
+            [
+                {"text": "⏳ 1 Hour", "callback_data": f"tf_{symbol}_{interval}_{c_type}_1h"},
+                {"text": "📅 1 Day", "callback_data": f"tf_{symbol}_{interval}_{c_type}_1d"}
+            ],
+            [{"text": "🔙 Back to Main Menu", "callback_data": "go_main"}]
+        ]
+    }
+    return text, markup
+
 # ============================================
-# TELEGRAM UI & INTERACTIONS
+# TELEGRAM UI & MAIN MENUS
 # ============================================
 def send_telegram_msg(text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -175,23 +194,43 @@ def send_main_menu():
             [{"text": "🔥 MIDCAP 100", "callback_data": "m_midcap"}, {"text": "🔍 Search Stock", "callback_data": "m_search"}]
         ]
     }
-    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nબધા જ ઇન્ડેક્સ અને શેર્સમાં હવે સેન્ટિમેન્ટ, પ્રાઈઝ રેન્જ અને હોલ્ડિંગ સેલિંગ એલર્ટ ૧૦૦% જોડી દીધું છે. નીચે ક્લિક કરો:", reply_markup=markup)
+    send_telegram_msg("👋 <b>નમસ્તે રવિ! (Market Master Panel)</b>\n\nડેટા જોવા માટે નીચે આપેલા કોઈ પણ મેઈન બટન પર ક્લિક કરો. રિઝલ્ટ આવ્યા પછી તમે તેની ટાઇમફ્રેમ પણ બદલી શકશો:", reply_markup=markup)
 
 def handle_callback(callback_id, data):
     global user_status
-    text = ""
-    if data == "m_hbl": text = generate_advanced_report("HBLENGINE.NS")
-    elif data == "m_btc": text = generate_advanced_report("BTC-USD", is_crypto=True)
-    elif data == "m_nifty": text = generate_advanced_report("^NSEI")
-    elif data == "m_bnifty": text = generate_advanced_report("^NSEBANK")
-    elif data == "m_sensex": text = generate_advanced_report("^BSESN")
-    elif data == "m_next50": text = generate_advanced_report("^NSE91")
-    elif data == "m_midcap": text = generate_advanced_report("^NSMIDCP")
+    text, markup = "", None
+    
+    # મુખ્ય મેનૂના બટનો
+    if data == "m_hbl": text, markup = generate_advanced_report("HBLENGINE.NS", "5m")
+    elif data == "m_btc": text, markup = generate_advanced_report("BTC-USD", "5m", is_crypto=True)
+    elif data == "m_nifty": text, markup = generate_advanced_report("^NSEI", "5m")
+    elif data == "m_bnifty": text, markup = generate_advanced_report("^NSEBANK", "5m")
+    elif data == "m_sensex": text, markup = generate_advanced_report("^BSESN", "5m")
+    elif data == "m_next50": text, markup = generate_advanced_report("^NSE91", "5m")
+    elif data == "m_midcap": text, markup = generate_advanced_report("^NSMIDCP", "5m")
+    elif data == "go_main": 
+        send_main_menu()
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
+        return
     elif data == "m_search":
         user_status[CHAT_ID] = "WAITING_FOR_SEARCH"
-        text = "🔍 <b>Script Search Activated:</b>\n\nકૃપા કરીને નામ મોકલો:"
-    
-    if text: send_telegram_msg(text)
+        send_telegram_msg("🔍 <b>Script Search Activated:</b>\n\nકૃપા કરીને નામ મોકલો:")
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
+        return
+        
+    # 🔥 ટાઇમફ્રેમ ચેન્જ કરવાનું ડાયનેમિક બટન લોજિક (tf_symbol_oldtf_iscrypto_newtf)
+    elif data.startswith("tf_"):
+        parts = data.split("_")
+        sym = parts[1]
+        is_cry = True if parts[3] == "1" else False
+        new_tf = parts[4]
+        
+        # જૂના મેસેજને એડિટ કરવાને બદલે ફ્રેશ નવો મેસેજ મોકલશે ટાઇમફ્રેમના બટનો સાથે
+        text, markup = generate_advanced_report(sym, new_tf, is_crypto=is_cry)
+
+    if text: 
+        send_telegram_msg(text, reply_markup=markup)
+        
     requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
 def handle_search_text(user_text):
@@ -202,14 +241,14 @@ def handle_search_text(user_text):
         "TCS": "TCS.NS", "SBI": "SBIN.NS", "HDFC": "HDFCBANK.NS"
     }
     symbol = mapping.get(query, f"{query}.NS")
-    text = generate_advanced_report(symbol)
-    send_telegram_msg(text)
+    text, markup = generate_advanced_report(symbol, "5m")
+    send_telegram_msg(text, reply_markup=markup)
     user_status[CHAT_ID] = None 
 
 # ============================================
 # MAIN LOOP
 # ============================================
-print("Master engine with FULL Index & Stock Down-Trend Logic Active...")
+print("Multi-Timeframe Master Engine Active...")
 offset = 0
 start_time = time.time()
 
